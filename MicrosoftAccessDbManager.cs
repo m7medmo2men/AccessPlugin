@@ -5,66 +5,187 @@ using System.Data.OleDb;
 using System.Text.RegularExpressions;
 using MySql.Data.MySqlClient;
 using console_middleware.models;
+using System.Net;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
 
 namespace console_middleware.DataSourceManagers
 {
+    public class ConnectToSharedFolder : IDisposable
+    {
+        readonly string _networkName;
+
+        public ConnectToSharedFolder(string networkName, NetworkCredential credentials)
+        {
+            _networkName = networkName;
+
+            var netResource = new NetResource
+            {
+                Scope = ResourceScope.GlobalNetwork,
+                ResourceType = ResourceType.Disk,
+                DisplayType = ResourceDisplaytype.Share,
+                RemoteName = networkName
+            };
+
+            var userName = string.IsNullOrEmpty(credentials.Domain)
+                ? credentials.UserName
+                : string.Format(@"{0}\{1}", credentials.Domain, credentials.UserName);
+            // var userName = @"\\10.150.200.78\Administrator";
+
+            var result = WNetAddConnection2(
+                netResource,
+                credentials.Password,
+                userName,
+                0);
+
+            if (result != 0)
+            {
+                throw new Win32Exception(result, "Error connecting to remote share");
+            }
+        }
+
+        ~ConnectToSharedFolder()
+        {
+            Dispose(false);
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            WNetCancelConnection2(_networkName, 0, true);
+        }
+
+        [DllImport("mpr.dll")]
+        private static extern int WNetAddConnection2(NetResource netResource,
+            string password, string username, int flags);
+
+        [DllImport("mpr.dll")]
+        private static extern int WNetCancelConnection2(string name, int flags,
+            bool force);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public class NetResource
+        {
+            public ResourceScope Scope;
+            public ResourceType ResourceType;
+            public ResourceDisplaytype DisplayType;
+            public int Usage;
+            public string LocalName;
+            public string RemoteName;
+            public string Comment;
+            public string Provider;
+        }
+
+        public enum ResourceScope : int
+        {
+            Connected = 1,
+            GlobalNetwork,
+            Remembered,
+            Recent,
+            Context
+        };
+
+        public enum ResourceType : int
+        {
+            Any = 0,
+            Disk = 1,
+            Print = 2,
+            Reserved = 8,
+        }
+
+        public enum ResourceDisplaytype : int
+        {
+            Generic = 0x0,
+            Domain = 0x01,
+            Server = 0x02,
+            Share = 0x03,
+            File = 0x04,
+            Group = 0x05,
+            Network = 0x06,
+            Root = 0x07,
+            Shareadmin = 0x08,
+            Directory = 0x09,
+            Tree = 0x0a,
+            Ndscontainer = 0x0b
+        }
+    }
     public class MicrosoftAccessDbManager : IDBManager
     {
         public bool lastAttempt = false, connectionFailedNotQuery = false;
         
         public List<SaleTransaction> getSalesDateRange(Store storeDB, DateTime startDate, DateTime endDate)
         {
-            StoreDB store = (StoreDB)storeDB;
 
-            CommonFunctions.Log("\nMicrosoftAccessDbManager.getSalesDateRange(): Getting Sales for StoreID: " + store.StoreID);
+            try {
 
-            string connectionString = setConnectionString(store),
-                query = store.SqlQuery,
-                datetimeFormat = store.DateTimeFormat,
-                modifiedQuery, datetimeColumnName = "";
-
-            if (connectionString != "")
-            {
-                store.ConnectionAttempts += "S" + DateTime.Now.ToString("HH:mm");
-
-                CommonFunctions.updateConnectionString(store, connectionString);
-
-                modifiedQuery = CommonFunctions.removeSemiColon(query);
-
-                datetimeColumnName = getDatetimeColumnName(modifiedQuery, connectionString, store);
-
-                CommonFunctions.Log("\nMicrosoftAccessDbManager.getSalesDateRange(): Retrieving Sales.");
-
-                List<Func<DataTable>> functions = new List<Func<DataTable>>();
-                functions.Add(() => ModifyFinalInteger(modifiedQuery, datetimeColumnName, connectionString, store, startDate, endDate));
-                functions.Add(() => ModifyFinalString(modifiedQuery, datetimeColumnName, connectionString, store, startDate, endDate));
-                functions.Add(() => ModifyFinalDateTime(modifiedQuery, datetimeColumnName, connectionString, store, startDate, endDate, false));
-
-
-                DataTable resultsTable, zeroSalesTable = null;
-                foreach (Func<DataTable> func in functions)
+                CommonFunctions.Log("\nMicrosoftAccessDbManager.getRemoteFile(): Trying To Connect To Remote Server");
+                StoreDB store = (StoreDB)storeDB;
+                string networkPath = store.DbServerIP;
+                NetworkCredential credentials = new NetworkCredential(store.DbServerName, store.DbServerPassword, "10.150.200.78");
+                using (new ConnectToSharedFolder(networkPath, credentials))
                 {
-                    resultsTable = func();
-                    if (resultsTable != null && resultsTable.Rows.Count > 0)
+                    CommonFunctions.Log("\nSuccessfully connecting to Remote Server.\n");
+                    CommonFunctions.Log("\nMicrosoftAccessDbManager.getSalesDateRange(): Getting Sales for StoreID: " + store.StoreID);
+
+                    string connectionString = setConnectionString(store),
+                        query = store.SqlQuery,
+                        datetimeFormat = store.DateTimeFormat,
+                        modifiedQuery, datetimeColumnName = "";
+
+                    if (connectionString != "")
                     {
-                        store.QueryAttempts += "S" + DateTime.Now.ToString("HH:mm");
-                        return CommonFunctions.setSaleTranscationList(store, resultsTable);
+                        store.ConnectionAttempts += "S" + DateTime.Now.ToString("HH:mm");
+
+                        CommonFunctions.updateConnectionString(store, connectionString);
+
+                        modifiedQuery = CommonFunctions.removeSemiColon(query);
+
+                        datetimeColumnName = getDatetimeColumnName(modifiedQuery, connectionString, store);
+
+                        CommonFunctions.Log("\nMicrosoftAccessDbManager.getSalesDateRange(): Retrieving Sales.");
+
+                        List<Func<DataTable>> functions = new List<Func<DataTable>>();
+                        functions.Add(() => ModifyFinalDateTime(modifiedQuery, datetimeColumnName, connectionString, store, startDate, endDate, false));
+                        functions.Add(() => ModifyFinalString(modifiedQuery, datetimeColumnName, connectionString, store, startDate, endDate));
+                        functions.Add(() => ModifyFinalInteger(modifiedQuery, datetimeColumnName, connectionString, store, startDate, endDate));
+
+                        DataTable resultsTable, zeroSalesTable = null;
+                        foreach (Func<DataTable> func in functions)
+                        {
+                            resultsTable = func();
+                            if (resultsTable != null && resultsTable.Rows.Count > 0)
+                            {
+                                store.QueryAttempts += "S" + DateTime.Now.ToString("HH:mm");
+                                return CommonFunctions.setSaleTranscationList(store, resultsTable);
+                            }
+
+                            if (resultsTable != null && resultsTable.Rows.Count == 0)
+                                zeroSalesTable = resultsTable;
+                        }
+
+                        if (zeroSalesTable != null)
+                        {
+                            store.QueryAttempts += "S" + DateTime.Now.ToString("HH:mm");
+                            return new List<SaleTransaction>();
+                        }
+                        store.QueryAttempts += connectionFailedNotQuery == false ? "F" + DateTime.Now.ToString("HH:mm") : "";
+                        connectionFailedNotQuery = false;
                     }
-
-                    if (resultsTable != null && resultsTable.Rows.Count == 0)
-                        zeroSalesTable = resultsTable;
+                    
+                    CommonFunctions.Log("\n**** MicrosoftAccessDbManager.getSalesDateRange(): Failed to get Sales.");
+                    return null;
                 }
-
-                if (zeroSalesTable != null)
-                {
-                    store.QueryAttempts += "S" + DateTime.Now.ToString("HH:mm");
-                    return new List<SaleTransaction>();
-                }
-                store.QueryAttempts += connectionFailedNotQuery == false ? "F" + DateTime.Now.ToString("HH:mm") : "";
-                connectionFailedNotQuery = false;
+            } catch (Exception e) {
+                CommonFunctions.Log("\n**** Failed to connect to Remote Server");
+                CommonFunctions.Log("**** Exception Message: " + e.Message);
             }
-            CommonFunctions.Log("\n**** MicrosoftAccessDbManager.getSalesDateRange(): Failed to get Sales.");
             return null;
+            
         }
         private DataTable ModifyFinalDateTime(string modifiedQuery, string datetimeColumnName, string connectionString, StoreDB store, DateTime startDate, DateTime endDate, bool replace)
         {
@@ -94,7 +215,6 @@ namespace console_middleware.DataSourceManagers
                 }
 
                 CommonFunctions.Log("\nHandling DateTime Column of Type INTEGER. Attempt query:\n" + FinalQuery);
-                lastAttempt = true;
                 return fullResults;
             }
             catch (Exception e)
@@ -167,7 +287,7 @@ namespace console_middleware.DataSourceManagers
                 }
 
                 CommonFunctions.Log("\nHandling DateTime Column of Type INTEGER. Attempt query:\n" + FinalQuery);
-
+                lastAttempt = true;
                 return fullResults;
             }
             catch (Exception e)
@@ -228,15 +348,13 @@ namespace console_middleware.DataSourceManagers
         private string setConnectionString(StoreDB store)
         {
             // dbConnectionString = (string)storeJSONDetails["DbConnectionString"]  // to be added !!
-            string portTemp,
-                   connectionStringLocal = store.DbConnectionString,
+            // Provider = Microsoft.ACE.OLEDB.12.0; Data Source = D:\Work\Databases\String.mdb; Jet OLEDB:Database Password = string;
+            string connectionStringLocal = store.DbConnectionString,
                    dbIP = store.DbServerIP,
-                   port = store.DbTcpPort,
                    dbName = store.DbName,
                    dbUsername = store.DbUsername,
                    dbPassword = store.DbPassword,
-                   timeout = "5";
-
+                   temp = "";
             CommonFunctions.Log("\nMicrosoftAccessDbManager.setConnectionString(): Setting Connection String to connect with store DB.");
 
             if (connectionStringLocal != "")
@@ -259,13 +377,17 @@ namespace console_middleware.DataSourceManagers
 
             try // Type 1
             {
-                portTemp = port.Trim() == "" || port == "N/A" || port == null ? "3306" : port;
-                connectionStringLocal = "Server=" + dbIP + ";Port=" + portTemp + ";Database=" + dbName + ";Uid=" + dbUsername + ";Pwd=" + dbPassword + ";Connection Timeout=" + timeout + ";";
+                string networkPath = store.DbServerIP;
+                string DBName = store.DbName;
+                networkPath += "\\" + DBName + ".mdb";
+                string pass = store.DbPassword;                
+                //temp = @$"Provider=Microsoft.ACE.OLEDB.12.0;Data Source= {networkPath}; Jet OLEDB: Database Password = {pass};Persist Security Info=False;";
+                connectionStringLocal = $"Provider=Microsoft.ACE.OLEDB.12.0; Data Source = {networkPath}; Jet OLEDB:Database Password = {pass};";
                 TestConnection(connectionStringLocal, store);
 
-                CommonFunctions.Log("\nSuccessfully connected to store DB.\nConnection String (Type1):" + connectionStringLocal);
+                CommonFunctions.Log("\nSuccessfully connected to store DB.\nConnection String :" + connectionStringLocal);
 
-                return connectionStringLocal;
+                return temp;
             }
             catch (Exception e)
             {
@@ -309,9 +431,9 @@ namespace console_middleware.DataSourceManagers
         }
         private void TestConnection(string connectionString, Store store)
         {
-            using (OleDbConnection conn = new OleDbConnection())
+            using (var conn = new OleDbConnection(connectionString))
             {
-                conn.ConnectionString = connectionString;
+                //conn.ConnectionString = connectionString;
                 conn.Open();
                 conn.Close();
                 conn.Dispose();
@@ -327,12 +449,31 @@ namespace console_middleware.DataSourceManagers
 
             return headerNames = headerNames.Substring(0, headerNames.Length - 1);
         }
-        /*public static string getDatetimeColumnNameIf(DataTable headersTable, int datetimeMap)
+
+        public void getRemoteFile(Store store, string fileName) 
         {
-            // get 'datetimeColumn' Name from HeaderNames (using 'datetimeMap').
-            string nameCol = headersTable.Columns[datetimeMap - 1].ColumnName;
-            string retrievedDateName = headersTable.Rows[datetimeMap][nameCol].ToString();
-            return "[" + retrievedDateName + "]";
-        }*/
+            CommonFunctions.Log("\nMicrosoftAccessDbManager.getRemoteFile(): getting the file from the remote folder");
+            string networkPath = @"\\{10.150.200.78}\c$\Windows\Temp";
+            NetworkCredential credentials = new NetworkCredential(@"Administrator", "Pos_Admin@123", "10.150.200.78");
+            string myNetworkPath = string.Empty;
+            try {
+                using (new ConnectToSharedFolder(networkPath, credentials))
+                {
+                    myNetworkPath = networkPath + "\\" + fileName;
+                    System.IO.File.Copy(myNetworkPath, @"D:\\test.txt", true);
+                }
+                CommonFunctions.Log("\nSuccessfully get the file.\n");
+            } catch (Exception e) {
+                CommonFunctions.Log("\n**** Failed to get the file from the remote folder");
+                CommonFunctions.Log("**** Exception Message: " + e.Message);
+            }
+            
+        }
+
+        public string extractIP(StoreDB store) {
+            string ip = store.DbServerIP.Split("\\")[2];
+            return ip;
+        }
+        
     }
 }
