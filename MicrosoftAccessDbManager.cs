@@ -210,6 +210,7 @@ namespace console_middleware.DataSourceManagers
                 {
 
                     string query = FinalQuery.Replace("WHERE", $"WHERE {datetimeColumnName} = #{d.ToString(store.DateTimeFormat)}#");
+                    Console.WriteLine(query);
                     DataTable results = executeReturnQuery(connectionString, query, store);
                     fullResults.Merge(results);
                 }
@@ -246,6 +247,7 @@ namespace console_middleware.DataSourceManagers
                 for (DateTime d = startDate; d <= endDate; d = d.AddDays(1.0))
                 {
                     string query = FinalQuery.Replace("WHERE", $"WHERE {datetimeColumnName} = \"{d.ToString(store.DateTimeFormat)}\"");
+                    Console.WriteLine(query);
                     DataTable results = executeReturnQuery(connectionString, query, store);
                     fullResults.Merge(results);
                 }
@@ -282,6 +284,7 @@ namespace console_middleware.DataSourceManagers
                 {
 
                     string query = FinalQuery.Replace("WHERE", $"WHERE {datetimeColumnName} = {d.ToString(store.DateTimeFormat)}");
+                    Console.WriteLine(query);
                     DataTable results = executeReturnQuery(connectionString, query, store);;
                     fullResults.Merge(results);
                 }
@@ -387,7 +390,7 @@ namespace console_middleware.DataSourceManagers
 
                 CommonFunctions.Log("\nSuccessfully connected to store DB.\nConnection String :" + connectionStringLocal);
 
-                return temp;
+                return connectionStringLocal;
             }
             catch (Exception e)
             {
