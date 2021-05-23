@@ -8,6 +8,7 @@ using console_middleware.models;
 using System.Net;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Globalization;
 
 namespace console_middleware.DataSourceManagers
 {
@@ -147,6 +148,8 @@ namespace console_middleware.DataSourceManagers
 
                         datetimeColumnName = getDatetimeColumnName(modifiedQuery, connectionString, store);
 
+                        Console.WriteLine($"This is a modified Query {modifiedQuery}");
+
                         CommonFunctions.Log("\nMicrosoftAccessDbManager.getSalesDateRange(): Retrieving Sales.");
 
                         List<Func<DataTable>> functions = new List<Func<DataTable>>();
@@ -155,18 +158,17 @@ namespace console_middleware.DataSourceManagers
                         functions.Add(() => ModifyFinalInteger(modifiedQuery, datetimeColumnName, connectionString, store, startDate, endDate));
 
                         DataTable resultsTable, zeroSalesTable = null;
-                        foreach (Func<DataTable> func in functions)
+                        
+                        resultsTable = getDataMyVersion(connectionString, modifiedQuery, store, startDate, endDate);
+                        if (resultsTable != null && resultsTable.Rows.Count > 0)
                         {
-                            resultsTable = func();
-                            if (resultsTable != null && resultsTable.Rows.Count > 0)
-                            {
-                                store.QueryAttempts += "S" + DateTime.Now.ToString("HH:mm");
-                                return CommonFunctions.setSaleTranscationList(store, resultsTable);
-                            }
-
-                            if (resultsTable != null && resultsTable.Rows.Count == 0)
-                                zeroSalesTable = resultsTable;
+                            store.QueryAttempts += "S" + DateTime.Now.ToString("HH:mm");
+                            return CommonFunctions.setSaleTranscationList(store, resultsTable);
                         }
+
+                        if (resultsTable != null && resultsTable.Rows.Count == 0)
+                            zeroSalesTable = resultsTable;
+                        
 
                         if (zeroSalesTable != null)
                         {
@@ -181,6 +183,7 @@ namespace console_middleware.DataSourceManagers
                     return null;
                 }
             } catch (Exception e) {
+                // Revist This
                 CommonFunctions.Log("\n**** Failed to connect to Remote Server");
                 CommonFunctions.Log("**** Exception Message: " + e.Message);
             }
@@ -472,11 +475,28 @@ namespace console_middleware.DataSourceManagers
             }
             
         }
-
-        public string extractIP(StoreDB store) {
-            string ip = store.DbServerIP.Split("\\")[2];
-            return ip;
-        }
         
+        public DataTable getDataMyVersion(string connectionString, string query, Store store, DateTime start, DateTime end) {
+            
+            List<string> formats = new List<string>(new string[] {"yyyy-MM-ddTHH:mm:ss", "yyyy-MM-ddTHH:mm:ss.f",
+                "yyyy-MM-ddTHH:mm:ss.ff", "yyyy-MM-ddTHH:mm:ss.fff", "yyyy-MM-ddTHH:mm:ss.ffff", "yyyy-MM-dd HH:mm:ss",
+                "dd/MM/yyyy", "dd/M/yyyy", "d/M/yyyy", "d/MM/yyyy","dd/MM/yy", "dd/M/yy", "d/M/yy", "d/MM/yy","yyyy/MM/dd", "yyyy-MM-dd", "yyyyMMdd",
+                "HH:mm:ss", "H:mm:ss", "HH:mm", "M/d/yyyy hh:mm:ss tt"});
+            formats.Insert(0, store.DateTimeFormat);
+
+            DataTable allRows = executeReturnQuery(connectionString, query, store);
+            DataTable filtered = allRows.Clone();
+            foreach (DataRow row in allRows.Rows)
+            {
+                string date = row.ItemArray[3].ToString();
+                DateTime tempTime = new DateTime();
+                bool x = DateTime.TryParseExact(date, formats.ToArray(), CultureInfo.InvariantCulture, DateTimeStyles.None, out tempTime);
+                if (tempTime >= start && tempTime <= end)
+                {   
+                    filtered.ImportRow(row);
+                }
+            }
+            return filtered;
+        }
     }
 }
