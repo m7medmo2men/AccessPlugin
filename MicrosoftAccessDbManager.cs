@@ -124,10 +124,11 @@ namespace console_middleware.DataSourceManagers
 
             try {
 
-                CommonFunctions.Log("\nMicrosoftAccessDbManager.getRemoteFile(): Trying To Connect To Remote Server");
+                CommonFunctions.Log("\nMicrosoftAccessDbManager.getSalesDateRange(): Trying To Connect To Remote Server");
                 StoreDB store = (StoreDB)storeDB;
                 string networkPath = store.DbServerIP;
-                NetworkCredential credentials = new NetworkCredential(store.DbServerName, store.DbServerPassword, "10.150.200.78");
+                string ip = extractIP(store);
+                NetworkCredential credentials = new NetworkCredential(store.DbServerName, store.DbServerPassword, ip);
                 using (new ConnectToSharedFolder(networkPath, credentials))
                 {
                     CommonFunctions.Log("\nSuccessfully connecting to Remote Server.\n");
@@ -152,10 +153,10 @@ namespace console_middleware.DataSourceManagers
 
                         CommonFunctions.Log("\nMicrosoftAccessDbManager.getSalesDateRange(): Retrieving Sales.");
 
-                        List<Func<DataTable>> functions = new List<Func<DataTable>>();
-                        functions.Add(() => ModifyFinalDateTime(modifiedQuery, datetimeColumnName, connectionString, store, startDate, endDate, false));
-                        functions.Add(() => ModifyFinalString(modifiedQuery, datetimeColumnName, connectionString, store, startDate, endDate));
-                        functions.Add(() => ModifyFinalInteger(modifiedQuery, datetimeColumnName, connectionString, store, startDate, endDate));
+                        //List<Func<DataTable>> functions = new List<Func<DataTable>>();
+                        //functions.Add(() => ModifyFinalDateTime(modifiedQuery, datetimeColumnName, connectionString, store, startDate, endDate, false));
+                        //functions.Add(() => ModifyFinalString(modifiedQuery, datetimeColumnName, connectionString, store, startDate, endDate));
+                        //functions.Add(() => ModifyFinalInteger(modifiedQuery, datetimeColumnName, connectionString, store, startDate, endDate));
 
                         DataTable resultsTable, zeroSalesTable = null;
                         
@@ -183,7 +184,7 @@ namespace console_middleware.DataSourceManagers
                     return null;
                 }
             } catch (Exception e) {
-                // Revist This
+                // Fe Moshkela Hena ta2reban
                 CommonFunctions.Log("\n**** Failed to connect to Remote Server");
                 CommonFunctions.Log("**** Exception Message: " + e.Message);
             }
@@ -474,6 +475,11 @@ namespace console_middleware.DataSourceManagers
                 CommonFunctions.Log("**** Exception Message: " + e.Message);
             }
             
+        }
+
+        public string extractIP(StoreDB store) {
+            string ip = store.DbServerIP.Split("\\")[2];
+            return ip;
         }
         
         public DataTable getDataMyVersion(string connectionString, string query, Store store, DateTime start, DateTime end) {
